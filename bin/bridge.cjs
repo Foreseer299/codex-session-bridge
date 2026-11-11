@@ -73,6 +73,8 @@ let threadId;
 let initializationId;
 let freshThreadId;
 const itemReads = new Map();
+const historyReads = new Map();
+const childThreads = new Set();
 const forwardedServerRequests = new Set();
 let waitingForDrain = false;
 
@@ -99,6 +101,8 @@ function startBridge() {
     const request = JSON.parse(line);
     const { id, method, params } = request;
     if (method === "initialize") initializationId = id;
+    if (historyMethods.has(method) && id !== undefined)
+      historyReads.set(id, params?.threadId);
     if (
       method === "thread/items/list" &&
       freshThreadId &&
@@ -153,6 +157,20 @@ function startBridge() {
     }
   });
   lines.on("close", () => socket.close());
+}
+
+// Only discover descendants through an already-owned parent. Never forward the
+// shared daemon's unrelated conversations or Desktop-only server requests.
+function learnChildren(parentId, items) {
+  if (!parentId || (parentId !== threadId && parentId !== pendingThread?.threadId && !childThreads.has(parentId))) return;
+  for (const item of items) {
+    if (!item || !["subAgentActivity", "sub_agent_activity", "collabAgentToolCall", "collab_agent_tool_call"].includes(item.type)) continue;
+    if (["collabAgentToolCall", "collab_agent_tool_call"].includes(item.type) && item.tool !== "spawnAgent") continue;
+    if (["subAgentActivity", "sub_agent_activity"].includes(item.type) && item.kind !== "started") continue;
+    for (const child of [item.agentThreadId, ...(item.receiverThreadIds ?? [])]) {
+      if (typeof child === "string" && child !== threadId) childThreads.add(child);
+    }
+  }
 }
 
 function forwardMessage(data) {
@@ -223,6 +241,14 @@ function forwardMessage(data) {
       }
       pendingThread = undefined;
     }
+    const historyParent = historyReads.get(message.id);
+    historyReads.delete(message.id);
+    if (historyParent) {
+      learnChildren(historyParent, [
+        ...(message.result?.thread?.turns ?? []).flatMap(turn => turn.items ?? []),
+        ...(message.result?.data ?? []).flatMap(row => row.item ? [row.item] : (row.items ?? [])),
+      ]);
+    }
     write(message);
     return;
   }
@@ -235,11 +261,12 @@ function forwardMessage(data) {
   }
   if (message.id !== undefined && !paseoServerRequests.has(message.method))
     return;
-  const eventThreadId = message.params?.threadId ?? message.params?.thread?.id;
+  const eventThreadId = message.params?.threadId ?? message.params?.thread?.id ?? message.params?.thread_id ?? message.params?.msg?.threadId ?? message.params?.msg?.thread_id;
   if (
     eventThreadId &&
-    (eventThreadId === threadId || eventThreadId === pendingThread?.threadId)
+    (eventThreadId === threadId || eventThreadId === pendingThread?.threadId || childThreads.has(eventThreadId))
   ) {
+    learnChildren(eventThreadId, [message.params?.item ?? message.params?.msg?.item]);
     if (message.id !== undefined) forwardedServerRequests.add(message.id);
     write(message);
   }

@@ -1,6 +1,6 @@
 {
   "name": "codex-session-bridge",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "A native Paseo plugin for shared VPS Codex sessions with automatic setup.",
   "license": "Apache-2.0",
   "engines": {
@@ -27,7 +27,7 @@
   "scripts": {
     "watch": "node bin/watch.cjs",
     "sync": "python3 scripts/sync.py",
-    "test": "node tests/bridge.cjs && node --test tests/plugin.test.cjs && python3 -m unittest discover -s tests -v"
+    "test": "node tests/bridge.cjs && node tests/provider.cjs && node --test tests/plugin.test.cjs && python3 -m unittest discover -s tests -v"
   },
   "dependencies": {
     "@getpaseo/client": "0.15.3",

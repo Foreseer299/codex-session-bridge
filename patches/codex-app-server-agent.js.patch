@@ -76,7 +76,36 @@
      }
      async loadCollaborationModes() {
          if (!this.client)
-@@ -3097,6 +3134,26 @@
+@@ -3008,6 +3045,18 @@
+             return;
+         await this.readThreadHistory(this.client);
+     }
++    async syncSharedSubAgentStatus(client, childThreadId, callId) {
++        if (!this.sharedDaemon) return;
++        const revision = this.sharedSubAgentRevisions?.get(childThreadId) ?? 0;
++        const result = await client.request("thread/turns/list", {
++            threadId: childThreadId, sortDirection: "desc", limit: 1, itemsView: "notLoaded",
++        });
++        // A live start/completion wins over an older in-flight history response.
++        if ((this.sharedSubAgentRevisions?.get(childThreadId) ?? 0) !== revision) return;
++        const latest = result?.data?.[0];
++        const status = { completed: "completed", failed: "failed", interrupted: "canceled", inProgress: "running" }[latest?.status];
++        if (status) this.emitSubAgentActivityUpdate(callId, status, { reopen: status === "running" });
++    }
+     async loadPersistedSubAgentHistories(client, rootRoutes) {
+         const queue = rootRoutes.map((route) => ({
+             route,
+@@ -3036,6 +3085,9 @@
+                 for (const entry of childHistory.timeline) {
+                     this.emitProviderSubagentTimeline(next.route.childThreadId, entry.item, entry.timestamp);
+                 }
++                await this.syncSharedSubAgentStatus(client, next.route.childThreadId, next.route.toolCall.callId);
++                const settled = this.subAgentCallsByCallId.get(next.route.toolCall.callId)?.toolCall;
++                if (settled) Object.assign(next.route.toolCall, { status: settled.status, error: settled.error });
+                 for (const route of childHistory.subAgentRoutes) {
+                     queue.push({
+                         route,
+@@ -3097,6 +3149,26 @@
              throw new Error(`Failed to resume Codex thread ${threadId}: ${message}`, { cause: error });
          }
      }
@@ -103,7 +132,7 @@
      parseSlashCommandInput(text) {
          const trimmed = text.trim();
          if (!trimmed.startsWith("/") || trimmed.length <= 1) {
-@@ -3204,10 +3261,10 @@
+@@ -3204,10 +3276,10 @@
          };
      }
      applyTurnWorkflowPolicy(params, preset) {
@@ -116,7 +145,7 @@
              params.approvalPolicy = approvalPolicy;
          }
          if (sandboxPolicyType) {
-@@ -3905,6 +3962,8 @@
+@@ -3905,6 +3977,8 @@
          return !this.client.hasPendingRequests();
      }
      async close() {
@@ -125,7 +154,31 @@
          this.closed = true;
          this.clearPendingPermissions();
          this.pendingSubAgentNotificationsByThreadId.clear();
-@@ -4836,6 +4895,11 @@
+@@ -4253,6 +4327,10 @@
+         return `codex-turn-${this.nextTurnOrdinal++}`;
+     }
+     handleNotification(method, params) {
++        if (this.sharedDaemon && ["turn/started", "turn/completed"].includes(method) && params?.threadId) {
++            this.sharedSubAgentRevisions ??= new Map();
++            this.sharedSubAgentRevisions.set(params.threadId, (this.sharedSubAgentRevisions.get(params.threadId) ?? 0) + 1);
++        }
+         // An image must exist before its event, and completion must follow that event.
+         // Transport callbacks cannot await: the session owns their ordered drain.
+         const next = this.pendingNotifications.then(() => {
+@@ -4506,6 +4584,12 @@
+             this.subAgentCallIdByChildThreadId.set(receiverThreadId, timelineItem.callId);
+             state.childThreadIds.add(receiverThreadId);
+             this.emitProviderSubagentUpsert(receiverThreadId, state, timelineItem.status);
++            if (this.sharedDaemon && this.client && !this.historySubagentEvents && !owningCallId) {
++                // A child can finish before the parent announces its route. Recover
++                // that terminal state without waiting for another client refresh.
++                this.syncSharedSubAgentStatus(this.client, receiverThreadId, state.callId)
++                    .catch(() => {});
++            }
+         }
+         return childThreadIds;
+     }
+@@ -4836,6 +4920,11 @@
              return;
          }
          this.markCurrentThreadSaved(parsed.threadId);
@@ -137,11 +190,11 @@
          this.currentTurnId = parsed.turnId;
          const pendingIdentification = this.pendingForegroundTurnIdentification;
          if (pendingIdentification &&
-@@ -4859,6 +4923,7 @@
-         this.emitEvent({ type: "thread_started", provider: CODEX_PROVIDER, sessionId: current });
-     }
-     handleTurnCompletedNotification(parsed) {
+@@ -4873,6 +4962,7 @@
+             this.emitSubAgentActivityUpdate(subAgentCallId, status);
+             return;
+         }
 +        if (this.sharedDaemon) this.sharedTurnRevision = (this.sharedTurnRevision ?? 0) + 1;
-         const subAgentCallId = this.getSubAgentCallIdForThread(parsed.threadId);
-         if (subAgentCallId) {
-             if (parsed.threadId)
+         this.completePendingRootCompactions();
+         if (parsed.status === "failed") {
+             this.emitEvent({

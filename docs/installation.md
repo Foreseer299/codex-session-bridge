@@ -10,7 +10,7 @@
 - Paseo 服务端在同一主机运行，手机能连接它。
 - Paseo 与 Codex 使用同一个系统用户。
 
-| 项目 | v0.2.0 支持范围 |
+| 项目 | v0.2.1 支持范围 |
 | --- | --- |
 | 系统 | Linux |
 | Paseo 服务端 | 0.15.3 |
@@ -26,13 +26,13 @@
 ## 安装
 
 ```bash
-npx --yes github:Foreseer299/codex-session-bridge#v0.2.0
+npx --yes github:Foreseer299/codex-session-bridge#v0.2.1
 ```
 
 这条命令先通过官方 SDK 开启插件功能，再把 Git 发布版本注册为真正的 Paseo 插件，并等待配置结果。无需 npm 账号。此前已经启用 Paseo 插件功能时，也可以直接用原生命令：
 
 ```bash
-paseo plugin add https://github.com/Foreseer299/codex-session-bridge.git --ref v0.2.0
+paseo plugin add https://github.com/Foreseer299/codex-session-bridge.git --ref v0.2.1
 ```
 
 使用完整 Git URL，因为目前未登记到 Paseo 插件目录。首次直接 `plugin add` 且总开关关闭时，Paseo 0.15.3 的安装响应可能短暂显示 `failed`，随后后台加载；建议用上面会等待结果的 npx 命令。真正的成功标志是插件日志中的 `ready`，不是仅看到安装记录。
@@ -118,7 +118,7 @@ v0.1.0 是手工安装包，不能直接在已有补丁上再叠一层插件。�
 1. 停止旧同步器。若使用旧指南中的用户服务，运行 `systemctl --user disable --now codex-session-bridge.service`；前台运行则按 `Ctrl+C`。
 2. 停止 Paseo 服务端。在旧安装目录执行 `python3 scripts/install.py --uninstall` 预览，再执行 `python3 scripts/install.py --uninstall --apply` 恢复原件。
 3. 以原来的方式启动 Paseo，确认它正常可用。
-4. 执行本文的一条 `paseo plugin add … --ref v0.2.0` 命令，再做双向验收。
+4. 执行本文的一条 `paseo plugin add … --ref v0.2.1` 命令，再做双向验收。
 
 如果旧文件在安装后又被改动，旧卸载器会拒绝覆盖。先保留自己的改动并核对版本，不要跳过哈希校验；第三方补丁也需要先处理冲突。聊天记录会保留。
 
@@ -126,4 +126,4 @@ v0.1.0 是手工安装包，不能直接在已有补丁上再叠一层插件。�
 
 [Releases](https://github.com/Foreseer299/codex-session-bridge/releases) 仍提供版本包、源码包和 `SHA256SUMS`，用于核验或离线审阅；通常直接用上面的 Git 安装命令即可。
 
-仓库中的 `scripts/install.py` 保留给手动版迁移与高级排错，不是 v0.2.0 原生插件的常规安装入口。不要同时使用两套安装方式。
+仓库中的 `scripts/install.py` 保留给手动版迁移与高级排错，不是 v0.2.1 原生插件的常规安装入口。不要同时使用两套安装方式。

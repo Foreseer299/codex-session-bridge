@@ -17,7 +17,7 @@
       "path": "dist/server/server/agent/providers/codex-app-server-agent.js",
       "patch": "codex-app-server-agent.js.patch",
       "before_sha256": "137028b004cc6067c1b52005106d8bd4bc18fc3fecf07b4ddd96a9ff98fe3a7f",
-      "after_sha256": "38457414b8c1e2ca30814e7d68b36c1cd99ec0c34067592e4a10b67a8e4617e1"
+      "after_sha256": "9a26551e5f5ec6a572713c4fc62abf299a6b5bf450462c6b36c4e3df99217a2c"
     }
   ]
 }

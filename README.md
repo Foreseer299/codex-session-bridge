@@ -13,7 +13,7 @@ Shared VPS Codex sessions between Desktop and Paseo. Install once, pick up the s
 在已经运行 Paseo 和 Codex managed daemon 的 Linux 主机上执行：
 
 ```bash
-npx --yes github:Foreseer299/codex-session-bridge#v0.2.0
+npx --yes github:Foreseer299/codex-session-bridge#v0.2.1
 ```
 
 这条命令通过 Paseo 官方插件接口安装，并等待自动配置结果。安装后能在 `paseo plugin ls` 中管理。
@@ -23,6 +23,8 @@ npx --yes github:Foreseer299/codex-session-bridge#v0.2.0
 **首次安装会校验并应用三个兼容补丁，等待 Paseo 的任务空闲后自动重启 worker。** 客户端可能短暂断线后重连；正在运行任务时，安装生效需要等待。不会重启 VPS 或 Codex daemon。
 
 需要的环境：**Paseo 0.15.3、Codex managed daemon 0.167.1、Linux、Node.js ≥24、Python ≥3.11，以及 `git`、`npm`、`patch`**。Paseo 与 Codex 要由同一系统用户运行。这里的 daemon 版本不是终端中另一份 `codex` 的版本。
+
+已经装了 v0.2.0？本次兼容补丁有更新，先按 [升级步骤](docs/troubleshooting.md#从-v020-升级到-v021)移除旧版并等它恢复原件，再执行上面的命令。
 
 以前装过 v0.1.0 手动版？先按 [迁移说明](docs/installation.md#从-v010-迁移)恢复原件，再安装插件。
 
@@ -34,7 +36,8 @@ npx --yes github:Foreseer299/codex-session-bridge#v0.2.0
 - 共享原生会话 ID、消息和工具执行记录，不必逐条导入。
 - 双向同步标题、归档和恢复归档。
 - 重新打开运行中的会话时接回状态，连接断开后自动重连。
-- 同步进程随插件启动、停止，不需要自己守着终端。
+- 子代理完成、失败和中断状态会同步，重新打开聊天时也会核对最终状态。
+- 同步进程随插件启动、停止；Codex 后台启动较慢时会等待并重试。
 
 ```text
 Codex Desktop ── SSH ────────────────────┐

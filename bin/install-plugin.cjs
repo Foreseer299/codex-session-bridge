@@ -51,6 +51,16 @@ async function main() {
     const exists = (await client.listPlugins()).find((x) => x.id === ID);
     if (!exists) await client.installPluginSource({ source, ref });
     else {
+      const pluginPath = config.plugins?.[ID]?.path;
+      let installedVersion;
+      try {
+        installedVersion = JSON.parse(fs.readFileSync(path.join(pluginPath, "package.json"), "utf8")).version;
+      } catch {}
+      if (installedVersion !== version) {
+        const error = new Error("A different plugin version is installed. Run paseo plugin remove codex-session-bridge, wait for rollback to finish, then rerun this installer.");
+        error.code = "VERSION_MISMATCH";
+        throw error;
+      }
       if (exists.enabled === false) await client.enablePlugin(ID);
       console.log("Plugin is already registered; checking its current state.");
     }
@@ -90,7 +100,8 @@ async function main() {
     "Still pending. Inspect progress with: paseo plugin logs codex-session-bridge",
   );
 }
-main().catch(() => {
+main().catch((error) => {
+  if (error.code === "VERSION_MISMATCH") console.error(error.message);
   console.error(
     "Installation did not complete. Check that Paseo is running and inspect: paseo plugin logs codex-session-bridge",
   );

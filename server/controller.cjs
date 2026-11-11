@@ -14,6 +14,16 @@ function allIdle(rows) {
     rows.every((row) => typeof row.status === "string" && IDLE.has(row.status))
   );
 }
+async function daemonAvailable(socketPath) {
+  return await new Promise(resolve => {
+    const socket = require("node:net").createConnection(socketPath);
+    let settled = false;
+    const finish = value => { if (settled) return; settled = true; socket.destroy(); resolve(value); };
+    socket.setTimeout(1500, () => finish(false));
+    socket.once("connect", () => finish(true));
+    socket.once("error", () => finish(false));
+  });
+}
 async function main(options) {
   const env = environment(options),
     root = options.runtime;
@@ -197,6 +207,11 @@ async function main(options) {
         await sleep(1000);
         continue;
       }
+      if (!removing && !await daemonAvailable(path.join(options.codexHome, "app-server-control/app-server-control.sock"))) {
+        report("waiting_for_codex", "The private Codex daemon is not ready; retrying automatically.");
+        await sleep(3000);
+        continue;
+      }
       let rows;
       try {
         rows = await cli("ls", "--all");
@@ -218,7 +233,16 @@ async function main(options) {
       if (fs.existsSync(journal) && readJSON(journal).phase !== "installed")
         await managed(true);
       const actionWasRemoval = removing;
-      let result = await managed(actionWasRemoval);
+      let result;
+      try { result = await managed(actionWasRemoval); }
+      catch (error) {
+        if (!actionWasRemoval && error.message?.includes("daemon socket is missing")) {
+          report("waiting_for_codex");
+          await sleep(3000);
+          continue;
+        }
+        throw error;
+      }
       if (removing && !actionWasRemoval) result = await managed(true);
       if (result.changed) {
         restart();
@@ -230,11 +254,17 @@ async function main(options) {
         break;
       }
       // Probe RPC without logging or saving private session metadata.
-      await run(
-        options.node,
-        [path.join(root, "bin/bridge.cjs"), "--snapshot"],
-        { env, timeout: 15000, maxBuffer: 32 * 1024 * 1024 },
-      );
+      try {
+        await run(
+          options.node,
+          [path.join(root, "bin/bridge.cjs"), "--snapshot"],
+          { env, timeout: 15000, maxBuffer: 32 * 1024 * 1024 },
+        );
+      } catch {
+        report("waiting_for_codex", "Codex RPC is unavailable; retrying automatically.");
+        await sleep(3000);
+        continue;
+      }
       watcher = spawn(options.node, [path.join(root, "bin/watch.cjs")], {
         env,
         stdio: ["ignore", "inherit", "inherit"],
@@ -268,4 +298,4 @@ if (require.main === module) {
     process.exitCode = 1;
   });
 }
-module.exports = { allIdle };
+module.exports = { allIdle, daemonAvailable };

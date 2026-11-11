@@ -70,3 +70,19 @@ test("removal and both plugin disable switches are recognized", (t) => {
   write({ pluginsEnabled: true, plugins: {} });
   assert.equal(Boolean(enabled(root)), false);
 });
+test('a late or restarted Codex daemon is detected without a plugin reload', async t => {
+  const { daemonAvailable } = require('../server/controller.cjs');
+  const net = require('node:net');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'bridge-startup-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const socketPath = path.join(root, 'daemon.sock');
+  assert.equal(await daemonAvailable(socketPath), false);
+  const server = net.createServer(s => s.destroy());
+  await new Promise(r => server.listen(socketPath, r));
+  assert.equal(await daemonAvailable(socketPath), true);
+  await new Promise(r => server.close(r));
+  assert.equal(await daemonAvailable(socketPath), false);
+  await new Promise(r => server.listen(socketPath, r));
+  assert.equal(await daemonAvailable(socketPath), true);
+  await new Promise(r => server.close(r));
+});
