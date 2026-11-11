@@ -1,0 +1,23 @@
+{
+  "version": "0.15.3",
+  "files": [
+    {
+      "path": "dist/server/server/agent/agent-loading.js",
+      "patch": "agent-loading.js.patch",
+      "before_sha256": "9996acc0c00d81ed85414f22d8a1c76244a0a975a6f42199cd123a2ce32c36dc",
+      "after_sha256": "4230f71df2123fb2b816aba36b5777e850abcc9c93731679e5abbbfe82a9ebcc"
+    },
+    {
+      "path": "dist/server/server/agent/agent-manager.js",
+      "patch": "agent-manager.js.patch",
+      "before_sha256": "70ccb7af3911971e2b869d92d3038fbdbb3ac9c75ba2a54dd1a48f899346d4b0",
+      "after_sha256": "86367f6f0f9417ac0bc7067c65adcaf5f2b80a6d914840a4cc87da05be719eef"
+    },
+    {
+      "path": "dist/server/server/agent/providers/codex-app-server-agent.js",
+      "patch": "codex-app-server-agent.js.patch",
+      "before_sha256": "137028b004cc6067c1b52005106d8bd4bc18fc3fecf07b4ddd96a9ff98fe3a7f",
+      "after_sha256": "38457414b8c1e2ca30814e7d68b36c1cd99ec0c34067592e4a10b67a8e4617e1"
+    }
+  ]
+}

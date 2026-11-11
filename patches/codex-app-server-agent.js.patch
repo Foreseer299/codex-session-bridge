@@ -1,0 +1,147 @@
+--- a/dist/server/server/agent/providers/codex-app-server-agent.js
++++ b/dist/server/server/agent/providers/codex-app-server-agent.js
+@@ -1,3 +1,4 @@
++// Modified by Codex Session Bridge: shared-daemon session compatibility.
+ import { validateProviderOptions } from "../provider-options.js";
+ import { getAgentStreamEventTurnId, } from "../agent-sdk-types.js";
+ import { importSessionFromPersistence } from "../provider-session-import.js";
+@@ -2611,6 +2612,11 @@
+         this.currentMode = config.modeId ?? DEFAULT_CODEX_MODE_ID;
+         this.providerOptions =
+             validateProviderOptions("codex", CodexProviderOptionsSchema, config.providerOptions) ?? {};
++        if (this.providerOptions.approval_policy === "never" &&
++            this.providerOptions.sandbox_mode === "danger-full-access" && config.modeId === undefined) {
++            this.currentMode = "full-access";
++            this.hasWorkflowModeOverride = true;
++        }
+         this.config = config;
+         this.harnessEnvironment = deps.environment ?? buildCodexAppServerEnv();
+         this.asyncQuestions = new CodexAsyncQuestions(resumeHandle?.metadata?.asyncQuestions);
+@@ -2688,6 +2694,7 @@
+         try {
+             const initialized = toObjectRecord(await client.request("initialize", buildCodexAppServerInitializeParams()));
+             this.threadRollbackAvailable = codexServerHasThreadRollback(initialized?.userAgent);
++            this.sharedDaemon = initialized?.paseoSharedDaemon === true;
+             client.notify("initialized", {});
+             this.speedModels =
+                 CodexModelListResponseSchema.parse(await client.request("model/list", {})).data ?? [];
+@@ -2697,6 +2704,7 @@
+             await this.loadSkills();
+             if (this.currentThreadId) {
+                 await this.ensureThreadLoaded();
++                await this.syncSharedActiveTurn();
+                 await this.applyDefaultModelAndThinking();
+             }
+             if (this.closed) {
+@@ -2750,6 +2758,13 @@
+     }
+     handleUnexpectedTermination(error) {
+         this.connectionState = "disconnected";
++        if (this.sharedDaemon && !this.closed) {
++            // The shared daemon owns the turn; losing this client does not fail it.
++            this.sharedRecoveryTurnId = this.currentTurnId ?? this.sharedRecoveryTurnId;
++            this.cachedRuntimeInfo = null;
++            this.scheduleSharedReconnect();
++            return;
++        }
+         const hasActiveRootTurn = this.activeForegroundTurnId !== null || this.currentTurnId !== null;
+         this.clearPendingPermissions({ preservePlanApprovals: !hasActiveRootTurn });
+         if (hasActiveRootTurn) {
+@@ -2764,6 +2779,28 @@
+         this.currentTurnId = null;
+         this.pendingForegroundTurnIdentification?.resolve(null);
+         this.pendingForegroundTurnIdentification = null;
++    }
++    scheduleSharedReconnect() {
++        if (this.closed || this.sharedReconnectTimer) return;
++        this.sharedReconnectTimer = setTimeout(async () => {
++            this.sharedReconnectTimer = null;
++            if (this.closed) return;
++            try {
++                if (this.connectionState === "disconnected" && !this.connectionPromise) {
++                    const client = this.client;
++                    this.client = null;
++                    client?.setUnexpectedTerminationHandler(null);
++                    await client?.dispose();
++                }
++                await this.connect();
++                await this.pendingNotifications;
++                this.emitEvent({ type: "shared_history_refresh", provider: CODEX_PROVIDER });
++            } catch (error) {
++                this.logger.debug({ err: error }, "Shared Codex reconnect pending");
++                this.scheduleSharedReconnect();
++            }
++        }, 1500);
++        this.sharedReconnectTimer.unref?.();
+     }
+     async loadCollaborationModes() {
+         if (!this.client)
+@@ -3097,6 +3134,26 @@
+             throw new Error(`Failed to resume Codex thread ${threadId}: ${message}`, { cause: error });
+         }
+     }
++    // A shared daemon can already be running a turn before this client subscribes.
++    async syncSharedActiveTurn() {
++        if (!this.sharedDaemon || !this.currentThreadId || !this.client) return;
++        await this.pendingNotifications;
++        const revision = this.sharedTurnRevision ?? 0;
++        const result = await this.client.request("thread/turns/list", {
++            threadId: this.currentThreadId, limit: 1, sortDirection: "desc", itemsView: "summary",
++        });
++        await this.pendingNotifications;
++        if ((this.sharedTurnRevision ?? 0) !== revision) return;
++        const turn = result?.data?.[0];
++        if (turn?.status === "inProgress" && this.currentTurnId !== turn.id) {
++            this.handleTurnStartedNotification({ threadId: this.currentThreadId, turnId: turn.id });
++        } else if (turn && turn.status !== "inProgress" &&
++            turn.id === (this.currentTurnId ?? this.sharedRecoveryTurnId) && this.activeForegroundTurnId) {
++            this.handleTurnCompletedNotification({ threadId: this.currentThreadId,
++                status: turn.status, errorMessage: turn.error?.message ?? null });
++        }
++        this.sharedRecoveryTurnId = null;
++    }
+     parseSlashCommandInput(text) {
+         const trimmed = text.trim();
+         if (!trimmed.startsWith("/") || trimmed.length <= 1) {
+@@ -3204,10 +3261,10 @@
+         };
+     }
+     applyTurnWorkflowPolicy(params, preset) {
+-        const approvalPolicy = this.hasWorkflowModeOverride ? preset.approvalPolicy : undefined;
++        const approvalPolicy = this.providerOptions.approval_policy ?? (this.hasWorkflowModeOverride ? preset.approvalPolicy : undefined);
+         const sandboxPolicyType = this.providerOptions.sandbox_mode ??
+             (this.hasWorkflowModeOverride ? preset.sandbox : undefined);
+-        if (approvalPolicy && this.providerOptions.approval_policy === undefined) {
++        if (approvalPolicy) {
+             params.approvalPolicy = approvalPolicy;
+         }
+         if (sandboxPolicyType) {
+@@ -3905,6 +3962,8 @@
+         return !this.client.hasPendingRequests();
+     }
+     async close() {
++        clearTimeout(this.sharedReconnectTimer);
++        this.sharedReconnectTimer = null;
+         this.closed = true;
+         this.clearPendingPermissions();
+         this.pendingSubAgentNotificationsByThreadId.clear();
+@@ -4836,6 +4895,11 @@
+             return;
+         }
+         this.markCurrentThreadSaved(parsed.threadId);
++        if (this.sharedDaemon) {
++            this.sharedTurnRevision = (this.sharedTurnRevision ?? 0) + 1;
++            if (this.currentTurnId === parsed.turnId && this.activeForegroundTurnId) return;
++            this.activeForegroundTurnId ??= this.createTurnId();
++        }
+         this.currentTurnId = parsed.turnId;
+         const pendingIdentification = this.pendingForegroundTurnIdentification;
+         if (pendingIdentification &&
+@@ -4859,6 +4923,7 @@
+         this.emitEvent({ type: "thread_started", provider: CODEX_PROVIDER, sessionId: current });
+     }
+     handleTurnCompletedNotification(parsed) {
++        if (this.sharedDaemon) this.sharedTurnRevision = (this.sharedTurnRevision ?? 0) + 1;
+         const subAgentCallId = this.getSubAgentCallIdForThread(parsed.threadId);
+         if (subAgentCallId) {
+             if (parsed.threadId)

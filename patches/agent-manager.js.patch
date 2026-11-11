@@ -1,0 +1,18 @@
+--- a/dist/server/server/agent/agent-manager.js
++++ b/dist/server/server/agent/agent-manager.js
+@@ -1,3 +1,4 @@
++// Modified by Codex Session Bridge: shared-daemon session compatibility.
+ import { ensureAgentLoaded } from "./agent-loading.js";
+ import { projectTimelineRows } from "./timeline-projection.js";
+ import { describeHookAgent, publishAgentStream } from "../plugins/lifecycle/index.js";
+@@ -2960,6 +2961,10 @@
+         }
+     }
+     async dispatchSessionEvent(agent, event) {
++        if (event.type === "shared_history_refresh" && agent.session?.sharedDaemon) {
++            await this.hydrateTimelineFromProvider(agent.id, { force: true, broadcast: true });
++            return;
++        }
+         if (event.type === "provider_subagent") {
+             const update = this.providerSubagents.apply(agent.id, event.provider, event.event);
+             this.dispatch({ type: "provider_subagent", event: update });

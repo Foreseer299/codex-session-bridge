@@ -1,0 +1,36 @@
+--- a/dist/server/server/agent/agent-loading.js
++++ b/dist/server/server/agent/agent-loading.js
+@@ -1,3 +1,4 @@
++// Modified by Codex Session Bridge: shared-daemon session compatibility.
+ import { buildConfigOverrides, buildSessionConfig, extractAttention, extractTimestamps, isStoredAgentProviderAvailable, toAgentPersistenceHandle, } from "../persistence-hooks.js";
+ export class AgentNotFoundError extends Error {
+     constructor(agentId) {
+@@ -31,6 +32,16 @@
+     }
+     const existing = deps.agentManager.getAgent(agentId);
+     if (existing) {
++        // A daemon upgrade can disconnect a still-cached shared Codex runtime.
++        // Reconnect and catch up when a client opens or refreshes its timeline.
++        if (existing.session?.sharedDaemon && existing.session.connectionState === "disconnected") {
++            await existing.session.connect();
++            await deps.agentManager.hydrateTimelineFromProvider(agentId, {
++                force: true, broadcast: deps.broadcastTimeline === true,
++            });
++            await deps.agentManager.drainSessionEvents(agentId);
++            return deps.agentManager.getAgent(agentId) ?? existing;
++        }
+         return existing;
+     }
+     // A close may have started after the first barrier observed no in-flight
+@@ -78,7 +89,11 @@
+             });
+             deps.logger.info({ agentId, provider: record.provider }, "Agent created from stored config");
+         }
++        // A shared Codex thread can advance while the Paseo runtime is closed.
++        // Rebuild from Codex on a cold open even when a cached timeline exists.
++        const sharedCodex = handle?.provider === "codex" || handle?.provider === "codex-desktop-shared";
+         await deps.agentManager.hydrateTimelineFromProvider(agentId, {
++            force: sharedCodex,
+             broadcast: () => pendingOptions.broadcastTimeline,
+         });
+         return deps.agentManager.getAgent(agentId) ?? snapshot;

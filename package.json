@@ -1,0 +1,38 @@
+{
+  "name": "codex-session-bridge",
+  "version": "0.1.0",
+  "description": "Share VPS Codex sessions between Paseo and Codex Desktop.",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=24"
+  },
+  "files": [
+    "bin/*.cjs",
+    "scripts/*.py",
+    "patches/*.patch",
+    "patches/manifest.json",
+    "docs/*.md",
+    "tests/*.py",
+    "tests/*.cjs",
+    "licenses/*",
+    "README.md",
+    "NOTICE",
+    "LICENSE",
+    "npm-shrinkwrap.json"
+  ],
+  "scripts": {
+    "watch": "node bin/watch.cjs",
+    "sync": "python3 scripts/sync.py",
+    "test": "node tests/bridge.cjs && python3 -m unittest discover -s tests -v"
+  },
+  "dependencies": {
+    "ws": "8.22.2"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Foreseer299/codex-session-bridge.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Foreseer299/codex-session-bridge/issues"
+  }
+}
