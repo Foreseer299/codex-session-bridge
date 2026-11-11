@@ -157,6 +157,7 @@ def build_plan(args):
     shared = providers.setdefault("codex-desktop-shared", {})
     shared.update({"extends": "codex", "command": command})
     shared.setdefault("enabled", True)
+    shared.setdefault("label", "Codex Shared")
     plan.append((config_path, before, mode, encoded(config), mode))
     runtime = ROOT / ".bridge-state/runtime.json"
     runtime_config = {"paseoHome": str(paseo_home), "codexHome": str(codex_home),

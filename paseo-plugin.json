@@ -1,0 +1,7 @@
+{
+  "id": "codex-session-bridge",
+  "name": "Codex Session Bridge",
+  "description": "Continue the same VPS Codex sessions from Paseo and Codex Desktop.",
+  "requirements": { "paseo": "0.15.3" },
+  "build": [["npm", "ci", "--omit=dev", "--ignore-scripts", "--no-fund"], ["node", "scripts/prepare-plugin.cjs"]]
+}

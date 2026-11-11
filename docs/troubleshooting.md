@@ -1,107 +1,135 @@
 # 排错与回退
 
-先确认故障出在哪一层：Desktop 能否连接目标主机、Codex daemon 是否可用、Paseo 是否运行、watcher 是否持续运行。只修改出问题的一层，通常不需要重装整套环境。
+先查看插件状态与日志：
+
+```bash
+paseo plugin ls codex-session-bridge
+paseo plugin logs codex-session-bridge
+```
+
+使用自定义 Paseo home 时，为这两条命令加上与平时相同的 `--home`。提 Issue 前去掉日志中的个人路径、主机地址和会话信息。
+
+## 插件已经显示 running，但会话还没有同步
+
+`running` 只代表 Paseo 已加载插件。首次安装还要校验环境、配置桥接、应用兼容补丁，并等待任务空闲后重启 worker。
+
+先看日志是否仍在等待空闲。如果 Paseo 中有运行中或等待处理的任务，完成它们后再等一次自动检查。不要为了加快安装强制结束其他会话。
+
+worker 重启后客户端可能短暂重连。连接恢复后，再查看目标主机的会话列表。
+
+## 安装时提示版本或原始文件不匹配
+
+本版支持 Paseo `0.15.3` 和 Codex managed daemon `0.167.1`。版本相同但源码文件哈希不同，通常意味着安装过旧手动版、第三方补丁或本地改动。
+
+- v0.1.0 用户先按 [迁移步骤](installation.md#从-v010-迁移)恢复原件。
+- 第三方补丁用户先核对冲突，保留自己的修改。
+- 上游升级后，等待匹配版本的插件，或暂时卸载集成。
+
+不要修改版本号或跳过哈希校验来强行安装。
+
+## 提示找不到 Node、Python、Paseo CLI 或 patch
+
+插件使用当前 Paseo 的 Node，并从当前宿主安装定位 CLI；Python 与系统 `patch` 需要在服务进程的环境中可用。
+
+终端里能找到命令，不代表 systemd 启动的 Paseo 使用同一份 PATH。先核对 Paseo 自身的启动环境，再重载插件：
+
+```bash
+paseo plugin reload codex-session-bridge
+```
+
+这类主机环境修复不需要手动寻找并填写 Paseo 服务端包目录。
+
+## Socket 不存在、被拒绝或权限不足
+
+插件默认使用 Paseo 进程的 `CODEX_HOME`，未设置时使用 `$HOME/.codex`。其中应有 managed daemon 的私有控制 socket。
+
+没有 socket 时先让 Desktop 正常连接这台主机，确认后台已经启动。连接被拒绝时，可能是 socket 文件残留、后台没有监听。权限不足时，确认 Paseo 与 Codex 由同一系统用户运行。
+
+不要把 socket 改成所有人可写或转发到公网，也不要通过启动第二个独立 app-server 来替代 Desktop 所用的运行实例。
 
 ## 新聊天没有出现
 
 依次确认：
 
-1. 两个客户端选的是同一台主机，使用同一用户和 Codex home。
-2. 新聊天已发送消息并保存；只有空标签页时不会被发现。
-3. `npm run watch` 或对应服务仍在运行，日志没有连接错误。
-4. 会话没有归档，也不是临时会话或子代理会话。
-5. 等待几个同步周期，再刷新客户端列表。
+1. 两个客户端选的是同一台主机、同一个 Codex home。
+2. 新聊天已经发送消息并保存，不能只是空标签页。
+3. 插件已完成安装与重启阶段，Paseo 服务端仍在运行。
+4. 会话未归档，也不是临时会话或子代理会话。
+5. 等几个同步周期，再刷新列表。
 
-普通会话会自动发现；不是只绑定安装时打开的那一条。发现入口不代表所有原生 CLI 会话都能被多个进程同时写入。
+插件发现所有符合条件的普通会话，不是只绑定安装时打开的那一条。
 
 ## 有历史，但发消息失败
 
-读取历史成功只证明找到了会话，不能证明已连接到正确的 writer。
+先确认插件没有停在等待重启或冲突阶段。历史可读只表示找到了会话，还需要正确连接当前 writer。
 
-- 确认 Paseo 安装补丁后已重启，实际运行的服务端目录就是安装器修改的目录。
-- 确认桥接连接的是 Desktop 所用的 managed daemon 私有 socket。
-- 如果正在用独立 `codex resume` 操作这条会话，先结束那个进程，再从已验证的 Desktop / Paseo 入口继续。
+若正在用独立 `codex resume` 操作这条会话，先结束那个进程，再从 Desktop 或 Paseo 继续。不要复制聊天文件来绕过写入锁。
 
-不要通过启动第二个 `codex app-server` 或复制聊天文件来绕过锁。
-
-## 提示只能继续导入的 Desktop 会话
-
-例如出现 `Use this provider to continue an imported Codex Desktop conversation`，通常需要检查 provider 配置和兼容补丁是否都已载入。只改桥接命令、不更新新建会话相关的 Paseo 代码，会留下只能继续导入聊天的旧行为。
-
-重新运行安装预检，确认包路径、版本和文件检查通过；检查是不是另一份全局或本地 Paseo 安装正在运行。不要直接删除聊天记录再重试。
-
-## Socket 不存在、连接被拒绝或权限不足
-
-```bash
-test -S "$HOME/.codex/app-server-control/app-server-control.sock" \
-  && echo 'socket exists'
-```
-
-没有 socket：先恢复 managed daemon 自身，再启动 bridge。连接被拒绝：socket 文件可能还在，但后台进程没有正常监听。权限不足：确认 Paseo、watcher 和 daemon 由同一用户运行。
-
-不要把 socket 改成所有人可写，也不要为了排错把它转发到公网。它本来就只需在主机内部使用。
+旧手工部署出现 `Use this provider to continue an imported Codex Desktop conversation` 时，核对是否还在使用旧桥接命令；先完成旧版回退，再安装插件。
 
 ## 运行中回合看起来卡住
 
-查看 daemon 是否仍在执行，再查看 bridge 与 watcher 日志。重连恢复的是已有回合，不应该额外提交一轮生成。
+先检查 Codex daemon 是否还在执行，再看插件日志与客户端连接状态。重连应接回已有回合，不会主动再提交一轮生成。
 
-如果只有某个 Desktop 专属工具卡片等待操作，回到 Desktop 处理；Paseo 不会自动具备 Desktop 的全部工具。重新打开客户端后先确认当前回合状态，不要连发相同任务。
+Desktop 专属工具、界面操作或某些交互卡片仍需回到 Desktop 处理。Paseo 共享会话并不代表实现了 Desktop 的每种工具。
 
-## 归档、标题或列表没有马上更新
+## 手机 ChatGPT 仍然看不到 VPS
 
-消息传输和会话列表同步是不同的路径。先检查 watcher；前台终端关闭后，bridge 仍可能让已打开的聊天继续工作，但新会话发现和元数据同步会停止。
+这可能正是已报告的手机端缺口：桌面本地会话能显示，桌面通过 SSH 使用的远程项目和会话却不出现。见 [#23062](https://github.com/openai/codex/issues/23062) 和 [#24730](https://github.com/openai/codex/issues/24730)；后者按重复问题关闭，不表示功能已经修复。
 
-归档和恢复归档属于同步范围。永久删除、不同主机间的迁移、客户端窗口布局不属于。
+本插件提供的是 Paseo 中的同会话入口，不会修改 ChatGPT 手机 App。只要 Desktop 与 Paseo 之间已经能双向接续，就可以直接用 Paseo 继续 VPS 工作；无需等待手机 ChatGPT 的列表恢复，也不要为此改写 VPS 聊天文件。
 
-## Full access 为什么没有自动打开
+客户端功能后续可能变化，以上报告不代表所有版本都会遇到同一限制。
 
-安装器不会替用户放宽权限。先检查当前回合实际使用的客户端设置和目标主机的 Codex 配置；旧会话的设置也可能与新建会话不同。
+## 标题、归档或列表没有马上更新
 
-Full access 和双向同步是两件事。不要为了消除同步错误而更改与连接无关的审批策略。
+实时消息与列表同步走不同的路径。确认插件同步进程正常，等几个周期后刷新列表。永久删除、跨主机迁移和客户端窗口布局不属于同步范围。
+
+## Full access 没有自动打开
+
+插件保留现有审批与沙箱设置。需要 Full access 时，在目标主机的 Codex 与 Paseo 中明确选择，并用普通文件操作验证。
+
+共享会话不等于共享所有客户端设置，也不应靠放宽权限修复连接问题。
 
 ## 升级前先做什么
 
-本版本适配 Paseo `0.15.3` 和 Codex managed daemon `0.167.1`。上游升级可能改变内部文件或协议，因此本包不会承诺“跟着 latest 自动可用”。
+先阅读目标版本的兼容说明。升级 Paseo 或 Codex 之前，等任务结束并停用插件，让它恢复自己管理的兼容补丁；确认恢复完成后再升级上游。
 
-推荐顺序：
+插件版本更新通过 Paseo 的插件管理完成，可先查看：
 
-1. 等当前任务结束，停止 watcher 和 Paseo 服务端。
-2. 使用**当前安装包**卸载集成并恢复安装备份。
-3. 升级 Paseo / Codex，先验证它们各自能正常使用。
-4. 获取明确支持新版本的本包，先预检再安装。
-5. 重启 Paseo 和 watcher，重新做一次双向新建、接续与归档验收。
+```bash
+paseo plugin update codex-session-bridge --check
+```
 
-如果尚无对应适配版本，请保留已验证的组合，或暂时卸载集成。不要跳过版本保护强行套补丁。
+准备更新时选择明确支持当前环境的发布版本。不要同时保留手动同步器和原生插件，也不要把旧版本的备份覆盖到新版 Paseo 上。
 
 ## 卸载与回退
 
-若配置了本文示例的用户服务，先停止并禁用它：
+临时停用：
 
 ```bash
-systemctl --user disable --now codex-session-bridge.service
+paseo plugin disable codex-session-bridge
 ```
 
-前台运行则按 `Ctrl+C`。停止 Paseo 服务端，然后在原安装目录执行：
+移除插件：
 
 ```bash
-python3 scripts/install.py --uninstall
-
-# 确认预览无误后恢复文件
-python3 scripts/install.py --uninstall --apply
+paseo plugin remove codex-session-bridge
 ```
 
-第一条命令仅预览，第二条才执行恢复。按安装器输出完成恢复，再启动 Paseo。保留原安装目录及其状态文件，直到确认卸载成功。
+插件会停止同步进程，并恢复自己写入的配置字段与兼容补丁；其他插件或用户后来增加的无关配置会保留。需要重新载入原件时，会等待 Paseo 空闲后自动重启 worker。任务持续运行时，恢复可能仍在等待，不要马上删除本地状态目录。
 
-如果安装器报告文件已在安装后变化，它会拒绝覆盖。先查看该文件是被上游升级还是自己修改，保留需要的改动，再按错误信息恢复对应版本。不要把旧备份直接覆盖到新版本的 Paseo 上。
+如果相关字段或补丁文件被其他程序修改，恢复会停止，避免覆盖新改动。保留 Paseo home 下的 `plugin-state/codex-session-bridge/`，核对冲突后再处理；其中有安装记录和原件备份，不要公开上传。
 
-卸载只处理本包安装时记录的改动，不删除原生 Codex 历史。安装备份用于回退本包改动，不是聊天记录备份。
+原生 Codex 聊天、Paseo 会话入口与同步元数据不会被删除。移除插件后，原有共享入口可能需要重新启用插件才能继续使用；聊天历史仍然保留在 Codex 中。
+
+v0.1.0 手工安装版使用旧目录中的 `python3 scripts/install.py --uninstall --apply`，详见 [迁移说明](installation.md#从-v010-迁移)。
 
 ## 提 Issue 时带什么
 
-- Linux 发行版与架构。
-- Node、Python、Paseo 服务端与 managed daemon 的版本。
-- 出问题的方向：Desktop → Paseo，还是 Paseo → Desktop。
-- 是新建、继续、改名、归档，还是断线恢复时发生。
-- 一段足够重现问题的操作说明，以及相关错误日志。
+- 系统与架构，以及 Paseo、Codex daemon、Node、Python 版本。
+- 插件版本和 `plugin ls` 中的状态。
+- 出问题的方向与动作：新建、继续、改名、归档或断线恢复。
+- 最短复现步骤，以及去掉隐私信息的相关日志。
 
-隐藏日志中的密钥、主机地址和个人路径，不要上传整个 Codex home、Paseo 数据目录或真实聊天档案。通常版本和错误附近的几行日志就够开始排查。
+不要上传完整配置、Codex home、Paseo 数据目录、安装备份或真实聊天档案。

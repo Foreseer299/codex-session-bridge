@@ -1,193 +1,129 @@
 # 安装与操作指南
 
-所有命令都在**运行 Paseo 与 Codex 的 Linux 主机**上执行。电脑、手机只是连接这台主机的入口。
+安装命令在**运行 Paseo 与 Codex 的 Linux 主机**上执行。手机和电脑是连接入口，无需各装一份插件。
 
-## 1. 确认现有环境
+## 先确认已有环境
 
-先确保以下两件事分别可用：
+插件连接已有的 Codex managed daemon，不负责安装 Codex、登录账号或创建 SSH 连接。安装前应当能做到：
 
-- Codex Desktop 能连接到这台主机，正常新建聊天并得到回复。
-- Paseo 客户端能连接到这台主机，服务端已安装并正常运行。
+- Desktop 已连接目标主机，在远程项目中正常聊天。
+- Paseo 服务端在同一主机运行，手机能连接它。
+- Paseo 与 Codex 使用同一个系统用户。
 
-本包连接已经存在的 Codex managed daemon，不负责安装、登录或启动它。不要为了安装本包再启动一个独立的 `codex app-server`：它不一定使用 Desktop 正在使用的运行实例。
-
-当前支持：Paseo 服务端 `0.15.3`、Codex managed daemon `0.167.1`、Node.js 24 或以上、Python 3.11 或以上。
-
-```bash
-node --version
-python3 --version
-patch --version
-```
-
-Paseo 与 daemon 必须由同一系统用户运行，并使用同一个 Codex home。常见位置为：
-
-| 位置 | 用途 |
+| 项目 | v0.2.0 支持范围 |
 | --- | --- |
-| `$HOME/.paseo` | Paseo 的配置和会话入口 |
-| `$HOME/.codex` | Codex 的配置和原生历史 |
-| `$HOME/.codex/app-server-control/app-server-control.sock` | managed daemon 的私有控制 socket |
+| 系统 | Linux |
+| Paseo 服务端 | 0.15.3 |
+| Codex managed daemon | 0.167.1 |
+| Node.js | ≥24，使用当前 Paseo 的 Node |
+| Python | ≥3.11，`python3` 可用 |
+| 安装工具 | `git`、`npm`、`patch` |
 
-可以只检查 socket 是否存在，不要打印其中的内容：
+插件会自动识别正在运行的 Paseo 包、CLI、Node 与 home。Codex home 优先读取 Paseo 进程环境中的 `CODEX_HOME`，未设置时使用 `$HOME/.codex`；它必须是 Desktop 正在使用的那份 home。
 
-```bash
-test -S "$HOME/.codex/app-server-control/app-server-control.sock" \
-  && echo 'Codex socket exists'
-```
+不要为安装插件另起一个独立 `codex app-server`。两个后台即使读到相同文件，也不等于共享同一个运行实例。
 
-自定义过路径时，用你的实际目录。不同的 home 即使属于同一用户，也可能指向不同的会话集合。
-
-## 2. 找到 Paseo 服务端包
-
-安装器需要的是 `@getpaseo/server` 的**包目录**，不是 Paseo 可执行文件，也不是 `$HOME/.paseo`。
-
-先查看全局 npm 包的位置：
+## 安装
 
 ```bash
-npm root -g
-npm ls -g @getpaseo/server --all
+npx --yes github:Foreseer299/codex-session-bridge#v0.2.0
 ```
 
-服务端可能是 `@getpaseo/cli` 的嵌套依赖。若上面的列表没有显示，再检查实际安装目录：
+这条命令先通过官方 SDK 开启插件功能，再把 Git 发布版本注册为真正的 Paseo 插件，并等待配置结果。无需 npm 账号。此前已经启用 Paseo 插件功能时，也可以直接用原生命令：
 
 ```bash
-find "$(npm root -g)" -path '*/@getpaseo/server/package.json' -print
+paseo plugin add https://github.com/Foreseer299/codex-session-bridge.git --ref v0.2.0
 ```
 
-把结果末尾的 `/package.json` 去掉，即为 `--paseo-package` 的值。找到多个版本时，以正在运行的 Paseo 所用目录为准。不要只选第一个结果。
+使用完整 Git URL，因为目前未登记到 Paseo 插件目录。首次直接 `plugin add` 且总开关关闭时，Paseo 0.15.3 的安装响应可能短暂显示 `failed`，随后后台加载；建议用上面会等待结果的 npx 命令。真正的成功标志是插件日志中的 `ready`，不是仅看到安装记录。
 
-如果从源码、本地 npm 目录或其他包管理器安装，检查那份安装里的 `@getpaseo/server/package.json`。要确认版本，可执行：
+正常安装会自动完成：
+
+1. Paseo 获取插件与固定的运行依赖。
+2. 安装阶段检查 Node/Python、Codex 版本和 socket，通过 Paseo 官方 SDK 开启插件总开关；加载后再识别宿主路径、校验原件哈希与配置。
+3. 将运行文件放入 Paseo home 下的 `plugin-state/codex-session-bridge/runtime`，保存本机私有回退资料。
+4. 写入所需桥接配置、应用三个版本锁定的兼容补丁。
+5. 等所有 Paseo 任务空闲后，通过 Paseo 官方接口重启 worker，使补丁生效，再启动同步进程。
+
+如果插件总开关原来关闭，开启后原先已标记为启用的其他插件也会开始运行。无需另行执行开启命令。
+
+不需要手动执行 `npm ci`、查找 `node_modules`、编辑配置或创建 systemd 服务。Paseo 原来的 supervisor 与终端会保留；客户端在 worker 重启时可能短暂重连。若有任务持续运行，插件会等待，不应把这段等待误认为安装已即时生效。
+
+查看安装进度：
 
 ```bash
-node -p "require('/path/to/node_modules/@getpaseo/server/package.json').version"
+paseo plugin ls codex-session-bridge
+paseo plugin logs codex-session-bridge
 ```
 
-没有对应版本时先停止本次安装，不要把补丁手动贴到其他版本上。
+`running` 表示插件已被 Paseo 加载；仍需看日志确认配置、兼容补丁和重启阶段已经完成，然后做下面的双向验收。安装不启动模型任务。
 
-## 3. 解压并预检
+如果平时用 `--home` 选择特定 Paseo 实例，安装和管理插件时也给 `paseo` 命令加同一个 `--home`。这是选择目标实例，无需再提供服务端包路径。
 
-下载 GitHub Release 中的发布包，解压到一个打算长期保留的目录。本文用 `$HOME/codex-session-bridge` 举例；不要安装后马上删除这个目录，同步器还会用到它。
+## 双向验收
 
-下载 `codex-session-bridge-0.1.0.tgz` 与 `SHA256SUMS` 到同一目录后：
-
-```bash
-sha256sum --ignore-missing -c SHA256SUMS
-mkdir -p "$HOME/codex-session-bridge"
-tar -xzf codex-session-bridge-0.1.0.tgz \
-  -C "$HOME/codex-session-bridge" --strip-components=1
-cd "$HOME/codex-session-bridge"
-npm ci
-
-python3 scripts/install.py \
-  --paseo-home "$HOME/.paseo" \
-  --paseo-package /path/to/node_modules/@getpaseo/server \
-  --codex-home "$HOME/.codex"
-```
-
-将包路径替换成第 2 步找到的路径。如果 `paseo` 不在 PATH 中，加上 `--paseo-cli /path/to/paseo`。默认只做预检；确认输出中的目录与版本都正确。
-
-安装器会处理桥接入口、同步配置和三个 Paseo 兼容补丁。它不会复制你的登录凭据，不会迁移原生聊天文件，也不会自动修改审批策略。
-
-## 4. 正式安装
-
-等正在执行的回合结束，再停止当前 Paseo 服务端，避免它一边运行一边载入新旧两套代码。使用你原来的服务管理方式停止，**不用停止 Codex managed daemon**。
-
-在相同命令末尾加 `--apply`：
-
-```bash
-python3 scripts/install.py \
-  --paseo-home "$HOME/.paseo" \
-  --paseo-package /path/to/node_modules/@getpaseo/server \
-  --codex-home "$HOME/.codex" \
-  --apply
-```
-
-安装器会在本包的 `.bridge-state/` 目录中保存本机状态与备份，运行配置为 `.bridge-state/runtime.json`。保留这个目录，运行和卸载都会用到；不要把它上传到公开仓库。随后以原来的方式启动 Paseo 服务端。
-
-启动同步器：
-
-```bash
-npm run watch
-```
-
-`watch` 默认读取安装生成的 `.bridge-state/runtime.json`，无需重复输入目录。先保留这个终端，观察日志是否正常。它负责自动发现和会话状态同步；空闲等待不会自行提交模型任务。
-
-需要只执行一次发现和状态同步时，可以在同一目录运行 `npm run sync`；长期使用仍应保持 watcher 运行。
-
-## 5. 验收双向接续
-
-先用两个短聊天验证，避免拿正在执行重要任务的会话试错。
+先用两个短聊天验证：
 
 | 操作 | 应看到的结果 |
 | --- | --- |
-| Desktop 在该远程主机新建聊天并发送消息 | Paseo 的同一主机出现该会话 |
-| Paseo 打开它并回复 | Desktop 读到新的消息和回复 |
-| Paseo 新建另一个 Codex 聊天并发送消息 | Desktop 的该主机历史中能找到它 |
-| Desktop 打开后继续 | Paseo 能读到后续消息 |
-| 一侧改名，另一侧重新查看列表 | 标题一致 |
-| 一侧归档、恢复归档 | 另一侧对应状态更新 |
+| Desktop 在目标远程主机新建聊天并发送消息 | Paseo 的同一主机出现该会话 |
+| Paseo 打开它并回复 | Desktop 读到新消息和回复 |
+| Paseo 新建另一个 Codex 聊天并发送消息 | Desktop 的该主机历史中出现它 |
+| Desktop 打开后继续 | Paseo 能读到后续内容 |
+| 一侧改名 | 另一侧会话列表更新 |
+| 一侧归档，再恢复归档 | 另一侧状态跟随更新 |
 
-新建但尚未保存的空白聊天不会出现。发现并非瞬间完成，等几个同步周期；必要时刷新客户端会话列表。
+新建但尚未保存的空白聊天不会出现。发现和列表刷新需要几个同步周期，必要时刷新客户端列表。
 
-确认是共享会话的方法是查看两边映射到的原生 Codex thread ID。Paseo 自己的入口 ID 不需要与它相同。不要通过复制聊天文件来“对齐”它们。
+两边映射到同一个原生 Codex thread ID 才是共享会话。Paseo 自己的入口 ID 可以不同；不用复制聊天文件来对齐它们。
 
-若要测试正在执行的回合，可以在另一侧打开它，确认仍显示运行中。不要在两个窗口同时启动两轮互相矛盾的任务；原生 CLI 的独立 `codex resume` 也不在并发写入保证内。
+要测试运行中会话，可以在另一侧打开它，确认仍显示执行中。普通独立 `codex resume` 与 Desktop 同时写入不在并发保证内。
 
-## 6. 可选：让同步器常驻
+## 手机 ChatGPT 与 Paseo 如何配合
 
-前台验收通过后，再配置 systemd **用户服务**。这只管理同步器，不替代你已有的 Paseo 或 Codex 服务。
+ChatGPT 手机端能连接桌面主机，并不代表它会显示桌面通过 SSH 打开的 VPS 会话。已有用户报告桌面本地会话可见、SSH 会话不可见，即使桌面端的远程项目正常可用。[相关问题 #23062](https://github.com/openai/codex/issues/23062)
 
-先确定 npm 的绝对路径：
+本插件让 Paseo 连接 VPS 上的 Paseo 服务端，进入 Desktop 正在使用的同一份原生会话。手机 ChatGPT 可以继续处理它能访问的桌面会话；看不到的 VPS 工作，从 Paseo 接着查看和操作。
 
-```bash
-command -v npm
-command -v node
-mkdir -p "$HOME/.config/systemd/user"
-```
+这个入口不依赖 ChatGPT 手机端能否发现 SSH 会话，也不会修改 ChatGPT App。安装验收以 Desktop ↔ Paseo 的双向接续为准，不把官方文档提到某个场景当成手机端已经可用的证明。
 
-创建 `$HOME/.config/systemd/user/codex-session-bridge.service`：
+Desktop 专属工具需要回到支持它的客户端处理。权限、模型和客户端设置也不等同于会话历史同步；插件保留原有审批策略，需要 Full access 时由使用者明确设置。
 
-```ini
-[Unit]
-Description=Codex Session Bridge metadata watcher
-
-[Service]
-Type=simple
-WorkingDirectory=%h/codex-session-bridge
-ExecStart=/absolute/path/to/npm run watch
-Restart=on-failure
-RestartSec=5
-
-[Install]
-WantedBy=default.target
-```
-
-替换 `ExecStart` 为刚才查到的 npm 绝对路径；如果解压目录不同，也修改 `WorkingDirectory`。如果 Node 由 nvm 等工具安装，systemd 不会自动加载交互式 shell 的环境，需在 `[Service]` 中补上实际的可执行文件目录，例如：
-
-```ini
-Environment=PATH=/absolute/path/to/node/bin:/usr/local/bin:/usr/bin:/bin
-```
-
-先用 `Ctrl+C` 停掉前台 watcher，避免启动两份，再启用服务：
+## 日常管理
 
 ```bash
-systemctl --user daemon-reload
-systemctl --user enable --now codex-session-bridge.service
-systemctl --user status codex-session-bridge.service
-journalctl --user -u codex-session-bridge.service -n 50 --no-pager
+# 查看状态和日志
+paseo plugin ls codex-session-bridge
+paseo plugin logs codex-session-bridge
+
+# 重载插件
+paseo plugin reload codex-session-bridge
+
+# 停用后重新启用
+paseo plugin disable codex-session-bridge
+paseo plugin enable codex-session-bridge
+
+# 移除插件
+paseo plugin remove codex-session-bridge
 ```
 
-如果希望退出 SSH 后用户服务仍运行，可为当前用户启用 linger：
+同步进程由插件管理，Paseo 正常重启后会恢复；无需另建后台服务。不要再同时运行手动版 `npm run watch`。
 
-```bash
-loginctl enable-linger "$USER"
-```
+停用和卸载的恢复步骤、版本升级注意事项见 [排错与回退](troubleshooting.md)。
 
-部分主机需要管理员权限执行这一项。容器或没有 systemd 的环境，可以用现有进程管理器保持 `npm run watch` 运行。
+## 从 v0.1.0 迁移
 
-## 权限怎么设置
+v0.1.0 是手工安装包，不能直接在已有补丁上再叠一层插件。先保留旧安装目录与 `.bridge-state/` 备份，等正在执行的任务结束：
 
-本包保留现有权限设置。需要 Full access 时，在**目标主机**的 Codex 和 Paseo 设置中明确选择，并用一个普通文件操作验证。只调整自己理解并接受的权限范围。
+1. 停止旧同步器。若使用旧指南中的用户服务，运行 `systemctl --user disable --now codex-session-bridge.service`；前台运行则按 `Ctrl+C`。
+2. 停止 Paseo 服务端。在旧安装目录执行 `python3 scripts/install.py --uninstall` 预览，再执行 `python3 scripts/install.py --uninstall --apply` 恢复原件。
+3. 以原来的方式启动 Paseo，确认它正常可用。
+4. 执行本文的一条 `paseo plugin add … --ref v0.2.0` 命令，再做双向验收。
 
-不要把“共享会话”理解为“所有客户端的每个设置都同步”。模型、审批界面以及仅 Desktop 可用的工具，仍取决于客户端和 daemon 支持的行为。
+如果旧文件在安装后又被改动，旧卸载器会拒绝覆盖。先保留自己的改动并核对版本，不要跳过哈希校验；第三方补丁也需要先处理冲突。聊天记录会保留。
 
-后续升级、卸载及常见错误见 [排错与回退](troubleshooting.md)。
+## 发布包与开发者安装
+
+[Releases](https://github.com/Foreseer299/codex-session-bridge/releases) 仍提供版本包、源码包和 `SHA256SUMS`，用于核验或离线审阅；通常直接用上面的 Git 安装命令即可。
+
+仓库中的 `scripts/install.py` 保留给手动版迁移与高级排错，不是 v0.2.0 原生插件的常规安装入口。不要同时使用两套安装方式。
